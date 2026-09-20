@@ -91,6 +91,63 @@ describe('write', () => {
         assert.equal('Hello!\n', contents.toString());
       }
     });
+
+    it('should serialize concurrent writes to the same filepath', async() => {
+      const fp = tmp('race.txt');
+      // A larger first write and a smaller second write reproduces #13
+      // without 100MB buffers: without a queue the smaller write finishes
+      // first, then the large write overwrites (or tears) the file.
+      const first = Buffer.alloc(2 * 1024 * 1024, 0x61);
+      const second = Buffer.alloc(64 * 1024, 0x62);
+      let contentsAfterFirst;
+
+      const started = write(fp, first, { overwrite: true }).then(result => {
+        contentsAfterFirst = fs.readFileSync(fp);
+        return result;
+      });
+      const queuedLast = write(fp, second, { overwrite: true });
+
+      await Promise.all([started, queuedLast]);
+
+      assert.ok(contentsAfterFirst.equals(first), 'each write finishes completely before the next starts');
+      assert.ok(fs.readFileSync(fp).equals(second), 'last-queued write wins after serialization');
+    });
+
+    it('should serialize concurrent writes that use different path strings', async() => {
+      const fp = tmp('race-alias.txt');
+      const alias = path.relative(process.cwd(), fp);
+      const first = Buffer.from('first-alias-write');
+      const second = Buffer.from('second-alias-write');
+
+      await Promise.all([
+        write(fp, first, { overwrite: true }),
+        write(alias, second, { overwrite: true })
+      ]);
+
+      assert.equal(fs.readFileSync(fp, 'utf8'), second.toString());
+    });
+
+    it('should run the next write if the previous write fails', async() => {
+      const fp = tmp('after-error.txt');
+      const orig = fs.createWriteStream;
+      let count = 0;
+
+      fs.createWriteStream = function(dest, options) {
+        const stream = orig.call(this, dest, options);
+        if (++count === 1) {
+          process.nextTick(() => stream.destroy(new Error('boom')));
+        }
+        return stream;
+      };
+
+      try {
+        await assert.rejects(() => write(fp, 'nope'));
+        await write(fp, 'recovered');
+        assert.equal(fs.readFileSync(fp, 'utf8'), 'recovered');
+      } finally {
+        fs.createWriteStream = orig;
+      }
+    });
   });
 
   describe('sync', () => {

@@ -52,15 +52,17 @@ const write = (filepath, data, options, callback) => {
     throw new Error('File already exists: ' + destpath);
   }
 
-  const promise = mkdir(path.dirname(destpath), { recursive: true, ...options })
-    .then(() => {
-      return new Promise((resolve, reject) => {
-        fs.createWriteStream(destpath, opts)
-          .on('error', err => reject(err))
-          .on('close', resolve)
-          .end(ensureNewline(data, opts));
+  const promise = enqueueWrite(destpath, () => {
+    return mkdir(path.dirname(destpath), { recursive: true, ...options })
+      .then(() => {
+        return new Promise((resolve, reject) => {
+          fs.createWriteStream(destpath, opts)
+            .on('error', err => reject(err))
+            .on('close', resolve)
+            .end(ensureNewline(data, opts));
+        });
       });
-    });
+  });
 
   if (typeof callback === 'function') {
     promise.then(() => callback(null, result)).catch(callback);
@@ -97,9 +99,11 @@ write.sync = (filepath, data, options) => {
     throw new Error('File already exists: ' + destpath);
   }
 
-  mkdirSync(path.dirname(destpath), { recursive: true, ...options });
-  fs.writeFileSync(destpath, ensureNewline(data, opts), opts);
-  return { path: destpath, data };
+  return withWriteLockSync(destpath, () => {
+    mkdirSync(path.dirname(destpath), { recursive: true, ...options });
+    fs.writeFileSync(destpath, ensureNewline(data, opts), opts);
+    return { path: destpath, data };
+  });
 };
 
 /**
@@ -138,6 +142,34 @@ write.stream = (filepath, options) => {
 
   mkdirSync(path.dirname(destpath), { recursive: true, ...options });
   return fs.createWriteStream(destpath, opts);
+};
+
+/**
+ * Serialize writes to the same absolute path so concurrent write()
+ * calls cannot interleave. write.sync writes immediately (writeFileSync)
+ * and appends a queue barrier for later write() calls.
+ */
+
+const pendingWrites = new Map();
+
+const enqueueWrite = (filepath, task) => {
+  const key = path.resolve(filepath);
+  const previous = pendingWrites.get(key) || Promise.resolve();
+  const current = previous.then(() => task(), () => task());
+  pendingWrites.set(key, current);
+  const cleanup = () => {
+    if (pendingWrites.get(key) === current) {
+      pendingWrites.delete(key);
+    }
+  };
+  current.then(cleanup, cleanup);
+  return current;
+};
+
+const withWriteLockSync = (filepath, fn) => {
+  const result = fn();
+  enqueueWrite(filepath, () => {});
+  return result;
 };
 
 /**
