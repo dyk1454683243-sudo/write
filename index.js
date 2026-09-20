@@ -99,11 +99,9 @@ write.sync = (filepath, data, options) => {
     throw new Error('File already exists: ' + destpath);
   }
 
-  return withWriteLockSync(destpath, () => {
-    mkdirSync(path.dirname(destpath), { recursive: true, ...options });
-    fs.writeFileSync(destpath, ensureNewline(data, opts), opts);
-    return { path: destpath, data };
-  });
+  mkdirSync(path.dirname(destpath), { recursive: true, ...options });
+  fs.writeFileSync(destpath, ensureNewline(data, opts), opts);
+  return { path: destpath, data };
 };
 
 /**
@@ -145,9 +143,9 @@ write.stream = (filepath, options) => {
 };
 
 /**
- * Serialize writes to the same absolute path so concurrent write()
- * calls cannot interleave. write.sync writes immediately (writeFileSync)
- * and appends a queue barrier for later write() calls.
+ * Serialize async writes to the same absolute path so concurrent
+ * write() calls cannot interleave. write.sync uses writeFileSync and
+ * completes before returning, so two sync writes cannot interleave.
  */
 
 const pendingWrites = new Map();
@@ -164,12 +162,6 @@ const enqueueWrite = (filepath, task) => {
   };
   current.then(cleanup, cleanup);
   return current;
-};
-
-const withWriteLockSync = (filepath, fn) => {
-  const result = fn();
-  enqueueWrite(filepath, () => {});
-  return result;
 };
 
 /**
