@@ -1,5 +1,11 @@
 # Changelog
 
+### Unreleased
+
+**Fixed**
+
+- `increment: true` now checks the filesystem before renaming, so the first write on an empty directory creates `foo.txt` instead of `foo (2).txt` on Windows (#11)
+
 ### v2.0.0 - 2019-08-12
 
 **Changes**

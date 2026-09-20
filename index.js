@@ -141,12 +141,15 @@ write.stream = (filepath, options) => {
 };
 
 /**
- * Increment the filename if the file already exists and enabled by the user
+ * Increment the filename if the file already exists and enabled by the user.
+ * `fs: true` lets add-filename-increment check the destination; without it,
+ * Windows starts at 2 and writes `foo (2).txt` even when `foo.txt` is unused.
  */
 
 const incrementName = (destpath, options = {}) => {
-  if (options.increment === true) options.increment = void 0;
-  return increment(destpath, options);
+  const incrementOpts = { ...options, fs: true };
+  if (incrementOpts.increment === true) incrementOpts.increment = void 0;
+  return increment(destpath, incrementOpts);
 };
 
 /**

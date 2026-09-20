@@ -55,6 +55,14 @@ describe('write', () => {
       }
     });
 
+    it('should keep the original name when incrementing into an empty dir', async () => {
+      const file = tmp('foo.txt');
+      const result = await write(file, 'some data', { increment: true, platform: 'win32' });
+      assert.equal(result.path, file);
+      assert(fs.existsSync(file));
+      assert.equal(fs.existsSync(tmp('foo (2).txt')), false);
+    });
+
     it('should take a callback', cb => {
       let fp = tmp('a.txt');
       write(fp, 'content...', err => {
@@ -111,7 +119,7 @@ describe('write', () => {
       });
     });
 
-    it('should not overwrite existing files when specified', () => {
+    it('should automatically rename files to avoid conflicts', () => {
       files.forEach(file => {
         write.sync(file, 'content...');
         assert(fs.existsSync(file));
@@ -119,6 +127,39 @@ describe('write', () => {
         assert.notEqual(file, result.path);
         assert(fs.existsSync(result.path));
       });
+    });
+
+    // Regression for https://github.com/jonschlinkert/write/issues/11
+    // add-filename-increment starts at 2 on win32 unless it can check the
+    // filesystem, so increment:true on an empty dir created "foo (2).txt".
+    it('should keep the original name when incrementing into an empty dir', () => {
+      const file = tmp('foo.txt');
+      const options = { increment: true, platform: 'win32' };
+      const result = write.sync(file, 'some data', options);
+      assert.equal(result.path, file);
+      assert.equal(options.increment, true);
+      assert(fs.existsSync(file));
+      assert.equal(fs.existsSync(tmp('foo (2).txt')), false);
+      assert.equal(fs.readFileSync(file, 'utf8'), 'some data');
+    });
+
+    it('should keep the original name when incrementing without a platform override', () => {
+      const file = tmp('unused.txt');
+      const result = write.sync(file, 'some data', { increment: true });
+      assert.equal(result.path, file);
+      assert(fs.existsSync(file));
+    });
+
+    it('should increment using Windows conventions only when the dest exists', () => {
+      const file = tmp('foo.txt');
+      write.sync(file, 'first');
+      const second = write.sync(file, 'second', { increment: true, platform: 'win32' });
+      const third = write.sync(file, 'third', { increment: true, platform: 'win32' });
+      assert.equal(second.path, tmp('foo (2).txt'));
+      assert.equal(third.path, tmp('foo (3).txt'));
+      assert.equal(fs.readFileSync(file, 'utf8'), 'first');
+      assert.equal(fs.readFileSync(second.path, 'utf8'), 'second');
+      assert.equal(fs.readFileSync(third.path, 'utf8'), 'third');
     });
   });
 
@@ -158,6 +199,19 @@ describe('write', () => {
         let contents = fs.readFileSync(file, 'utf8');
         assert.equal('this is content...', contents.toString());
       }
+    });
+
+    it('should keep the original name when incrementing into an empty dir', async() => {
+      const file = tmp('foo.txt');
+      await new Promise((resolve, reject) => {
+        toStream('some data')
+          .pipe(write.stream(file, { increment: true, platform: 'win32' }))
+          .on('close', resolve)
+          .on('error', reject);
+      });
+      assert(fs.existsSync(file));
+      assert.equal(fs.existsSync(tmp('foo (2).txt')), false);
+      assert.equal(fs.readFileSync(file, 'utf8'), 'some data');
     });
   });
 });
